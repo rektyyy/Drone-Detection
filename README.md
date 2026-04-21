@@ -10,31 +10,47 @@ The models included are not intended to be state-of-the-art. They exist solely t
 
 ## Installation
 
-Create and activate a virtual environment using your preferred tool (e.g. `venv`, `conda`, or `micromamba`), then install the project. Example using `micromamba`:
+The project targets **Python 3.12** (`requires-python` in `pyproject.toml`).
+
+### uv (recommended)
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then from the repository root:
+
+```bash
+uv python install 3.12   # only needed if you do not already have CPython 3.12 on your PATH
+uv sync
+```
+
+`uv sync` creates `.venv`, resolves dependencies from `pyproject.toml`, writes `uv.lock`, and installs this package in **editable** mode — Python loads `src/` directly, so code changes apply without reinstalling.
+
+To use the environment in a shell: `source .venv/bin/activate` (Linux and macOS) or `.venv\Scripts\activate` (Windows). You can also prefix commands with `uv run` (for example `uv run python scripts/train_model.py …`).
+
+### PyTorch and CUDA
+
+`pyproject.toml` cannot tell whether you have a GPU or which CUDA version you need, so it cannot pick a PyTorch wheel for you. If you need a **specific** PyTorch build (CPU-only or a given CUDA release), install PyTorch **before** `uv sync`; the later sync will leave those packages in place if versions already satisfy the requirement:
+
+```bash
+uv venv --python 3.12
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+# CPU-only (Linux/Windows — macOS installs CPU by default)
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# CUDA 12.6
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+uv sync
+```
+
+Index URLs for other CUDA versions: [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/).
+
+### Alternative: micromamba
 
 ```bash
 micromamba create -n nn_2026_template python=3.12
 micromamba activate nn_2026_template
 pip install -e .
 ```
-
-The `-e` flag installs the project in **editable mode** — instead of copying the source into `site-packages`, Python points directly at the `src/` directory. This means any changes you make to the source code take effect immediately without reinstalling.
-
-All dependencies are declared in `pyproject.toml` and will be installed automatically.
-
-### PyTorch and CUDA
-
-`pyproject.toml` has no way to detect whether a GPU is present, so it cannot choose the right PyTorch build automatically. If you need a specific build, install PyTorch manually **before** running `pip install -e .`, and the subsequent install will skip it since it is already satisfied:
-
-```bash
-# CPU-only (Linux/Windows — macOS installs CPU by default)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-# CUDA 12.6
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-```
-
-The available index URLs for other CUDA versions are listed at [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/).
 
 ```bash
 micromamba install -c conda-forge libcst
