@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ProjectTemplate"
+version = "1.0"
+description = ""
+authors = [
+    { name = "Adrian Urbański" },
+]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+requires-python = "~= 3.12"
+classifiers = [
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "torch",
+    "torchvision",
+    "lightning",
+    "click",
+    "wandb",
+    "fiddle",
+    "scipy",
+    "jupyter",
+    "matplotlib",
+]
+
+# mypy
+[[tool.mypy.overrides]]
+module = ["fiddle.*"]
+follow_untyped_imports = true
+ignore_missing_imports = true
+
+# Build configuration
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

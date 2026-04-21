@@ -1,0 +1,21 @@
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data and outputs
+data/
+logs/
+lightning_logs/
+wandb/
+artifacts/
