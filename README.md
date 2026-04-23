@@ -63,8 +63,8 @@ micromamba install -c conda-forge libcst
 ```
 .
 ├── data/                        # Datasets (see note below)
-│   ├── mnist/
-│   └── utkface/
+│   ├── utkface/
+│   └── drone-detection/         # Kaggle drone dataset (YOLO layout; see below)
 │
 ├── scripts/
 │   └── train_model.py          # Single entry point for all experiments
@@ -76,7 +76,6 @@ micromamba install -c conda-forge libcst
     ├── config/
     │   ├── schemas.py           # ExperimentConfig and TrainingConfig dataclasses
     │   ├── constants.py         # W&B entity and project name
-    │   ├── convnet_mnist_classifier.py
     │   ├── convnet_utkface_classifier.py
     │   ├── convnet_utkface_regressor.py
     │   ├── mlp_utkface_classifier.py
@@ -85,8 +84,8 @@ micromamba install -c conda-forge libcst
     │       └── 1e-4.py
     │
     ├── datasets/
-    │   ├── mnist.py             # LightningDataModule for MNIST
-    │   └── utkface.py           # LightningDataModule for UTKFace
+    │   ├── utkface.py                 # LightningDataModule for UTKFace
+    │   └── drone_detection_yolo.py    # LightningDataModule for YOLO-folder drone data
     │
     ├── models/
     │   ├── classification_model.py   # LightningModule for classification
@@ -111,17 +110,53 @@ ln -s /path/to/your/data data
 
 # Linux / macOS — or symlink individual datasets separately
 ln -s /path/to/your/data/utkface data/utkface
-ln -s /path/to/your/data/mnist data/mnist
+ln -s /path/to/your/data/drone-detection data/drone-detection
 
 # Windows (run as Administrator) — entire directory
 mklink /D data C:\path\to\your\data
 
 # Windows (run as Administrator) — individual datasets
 mklink /D data\utkface C:\path\to\your\data\utkface
-mklink /D data\mnist C:\path\to\your\data\mnist
+mklink /D data\drone-detection C:\path\to\your\data\drone-detection
 ```
 
 This keeps all paths in the codebase relative (e.g. `data/utkface`), so configs and scripts work the same way on every machine regardless of where the data is physically stored.
+
+### Drone detection dataset (Kaggle)
+
+Download the **[Drone Detection](https://www.kaggle.com/datasets/cybersimar08/drone-detection)** dataset from Kaggle and place it under **`./data`** (the project gitignores `data/`, so nothing large is committed).
+
+1. Install the [Kaggle API](https://github.com/Kaggle/kaggle-api) and add your API credentials (`~/.kaggle/kaggle.json`).
+2. From the repository root:
+
+```bash
+kaggle datasets download -d cybersimar08/drone-detection -p data --unzip
+```
+
+3. After unzipping, you should have a **YOLO-style** layout: a root folder containing **`train`**, **`valid`** (or `val`), and **`test`**, each with **`images/`** and **`labels/`** subfolders. The example config expects that root at **`data/drone-detection`**. If Kaggle extracts a different directory name, either rename/move it to `data/drone-detection` or create a symlink, for example:
+
+```bash
+ln -sfn "drone-detection-new.v5-new-train.yolov8" data/drone-detection
+```
+
+(Adjust the source name to match what you actually have under `data/`.)
+
+**YOLO-ready batches:** `DroneDetectionYoloDataModule` resizes images to a square (default **640×640**), scales pixel values to **\[0, 1\]**, and parses each label file into YOLO boxes **in the same normalized format, relative to that square**. Each batch is a dict:
+
+- `images`: tensor `(B, 3, H, W)`
+- `targets`: length-`B` list of `(n_i, 5)` tensors with columns `cls, x_center, y_center, width, height`
+
+Use `DroneDetectionYoloDataModule` from your own `LightningModule` or training script, for example:
+
+```python
+from pathlib import Path
+from src.datasets.drone_detection_yolo import DroneDetectionYoloDataModule
+
+dm = DroneDetectionYoloDataModule(Path("data/drone-detection"), batch_size=8)
+# batch = next(iter(dm.train_dataloader()))
+```
+
+If your export uses **`val`** instead of **`valid`**, pass `val_dir="val"` into `DroneDetectionYoloDataModule` (or rename the folder on disk).
 
 ---
 
@@ -143,13 +178,13 @@ Each config file is a Python module that returns a `fdl.Config[ExperimentConfig]
 ## Running an experiment
 
 ```bash
-python scripts/train_model.py src/config/convnet_mnist_classifier.py
+python scripts/train_model.py src/config/convnet_utkface_classifier.py
 ```
 
 To disable W&B logging:
 
 ```bash
-python scripts/train_model.py src/config/convnet_mnist_classifier.py --no_wandb
+python scripts/train_model.py src/config/convnet_utkface_classifier.py --no_wandb
 ```
 
 To resume a previous run (e.g. after an early cancellation, power outage, or an HPC job timeout):
