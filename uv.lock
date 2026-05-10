@@ -1511,6 +1511,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "scipy" },
     { name = "torch" },
+    { name = "torchmetrics" },
     { name = "torchvision" },
     { name = "wandb" },
 ]
@@ -1524,6 +1525,7 @@ requires-dist = [
     { name = "matplotlib" },
     { name = "scipy" },
     { name = "torch" },
+    { name = "torchmetrics", specifier = ">=1.9.0" },
     { name = "torchvision" },
     { name = "wandb" },
 ]
