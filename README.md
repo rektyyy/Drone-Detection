@@ -133,13 +133,20 @@ Download the **[Drone Detection](https://www.kaggle.com/datasets/cybersimar08/dr
 kaggle datasets download -d cybersimar08/drone-detection -p data --unzip
 ```
 
-3. After unzipping, you should have a **YOLO-style** layout: a root folder containing **`train`**, **`valid`** (or `val`), and **`test`**, each with **`images/`** and **`labels/`** subfolders. The example config expects that root at **`data/drone-detection`**. If Kaggle extracts a different directory name, either rename/move it to `data/drone-detection` or create a symlink, for example:
+3. After unzipping, you should have a **YOLO-style** layout: a root folder containing **`train`**, **`valid`** (or `val`), and **`test`**, each with **`images/`** and **`labels/`** subfolders. The Kaggle API may extract the dataset into a subfolder like `data/drone-detection-new.v5-new-train.yolov8/`. The example config expects the splits directly under `data/`. Move the `train`, `valid`, and `test` folders directly to `data/`, so your structure looks like this:
 
-```bash
-ln -sfn "drone-detection-new.v5-new-train.yolov8" data/drone-detection
+```text
+data/
+├── train/
+├── valid/
+└── test/
 ```
 
-(Adjust the source name to match what you actually have under `data/`.)
+For example (adjust the folder name if Kaggle changes it):
+```bash
+mv data/drone-detection-new.v5-new-train.yolov8/* data/
+rmdir data/drone-detection-new.v5-new-train.yolov8
+```
 
 **YOLO-ready batches:** `DroneDetectionYoloDataModule` resizes images to a square (default **640×640**), scales pixel values to **\[0, 1\]**, and parses each label file into YOLO boxes **in the same normalized format, relative to that square**. Each batch is a dict:
 

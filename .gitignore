@@ -19,3 +19,7 @@ logs/
 lightning_logs/
 wandb/
 artifacts/
+*.log
+
+# Mac
+.DS_Store
