@@ -14,12 +14,18 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Data and outputs
+data
 data/
 logs/
 lightning_logs/
 wandb/
 artifacts/
 *.log
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
 
 # Mac
 .DS_Store
