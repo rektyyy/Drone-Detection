@@ -1,6 +1,7 @@
 # IDE
 .vscode/
 .idea/
+notes/
 
 # Python
 __pycache__/

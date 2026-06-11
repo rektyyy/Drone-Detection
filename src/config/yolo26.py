@@ -5,7 +5,7 @@ from lightning.pytorch.loggers import WandbLogger
 from src.config.constants import WANDB_ENTITY, WANDB_PROJECT
 from src.config.schemas import ExperimentConfig, TrainingConfig
 from src.datasets.drone_detection_yolo import DroneDetectionYoloDataModule
-from src.models.yolov8_model import UltralyticsDetectionModel
+from src.models.ultralytics_yolo import UltralyticsDetectionModel
 
 
 def build_config() -> fdl.Config[ExperimentConfig]:
