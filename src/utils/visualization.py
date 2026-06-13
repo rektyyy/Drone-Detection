@@ -20,8 +20,13 @@ def draw_boxes(
     labels: torch.Tensor,
     class_names: list[str],
     scores: torch.Tensor | None = None,
+    font_size: int | None = None,
+    line_width: int | None = None,
 ) -> Image.Image:
     """Draw labeled bounding boxes on an image and return a PIL image.
+
+    Font size and line width are auto-scaled from the image height when not given,
+    so visualizations look consistent regardless of whether the image is 128px or 640px.
 
     Args:
         image:       (3, H, W) float tensor in [0, 1] or uint8 tensor in [0, 255].
@@ -29,6 +34,8 @@ def draw_boxes(
         labels:      (N,) integer class indices.
         class_names: maps class index -> name (also used to pick a color).
         scores:      optional (N,) confidence scores, appended to the label text.
+        font_size:   override auto-scaled font size (pixels).
+        line_width:  override auto-scaled box border width (pixels).
     """
     img = image.detach().cpu()
     if img.dtype != torch.uint8:
@@ -36,6 +43,12 @@ def draw_boxes(
 
     if boxes_xyxy is None or len(boxes_xyxy) == 0:
         return Image.fromarray(img.permute(1, 2, 0).numpy())
+
+    H = img.shape[1]
+    # Scale font and line width proportionally to image height so labels are legible
+    # at any resolution when the figure axes are all displayed at the same screen size.
+    fs = font_size if font_size is not None else max(12, H // 25)
+    lw = line_width if line_width is not None else max(2, H // 120)
 
     boxes = boxes_xyxy.detach().cpu()
     labels = labels.detach().cpu()
@@ -46,7 +59,8 @@ def draw_boxes(
         text_labels.append(text)
         colors.append(CLASS_COLORS.get(name, "yellow"))
 
-    drawn = draw_bounding_boxes(img, boxes, labels=text_labels, colors=colors, width=2)
+    drawn = draw_bounding_boxes(img, boxes, labels=text_labels, colors=colors,
+                                width=lw, font_size=fs)
     return Image.fromarray(drawn.permute(1, 2, 0).numpy())
 
 

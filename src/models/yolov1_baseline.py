@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from torchvision.ops import nms
 
 # Class id -> human-readable name, used for per-class AP logging.
 CLASS_NAMES = ["AirPlane", "Drone", "Helicopter"]
@@ -156,10 +157,14 @@ class YoloV1Baseline(L.LightningModule):
 
                 valid_boxes_xyxy = torch.stack([xmin, ymin, xmax, ymax], dim=1)
 
+                # NMS: multiple adjacent grid cells can predict overlapping boxes for the
+                # same object. Suppress lower-scoring duplicates at IoU > 0.45 (same
+                # threshold as the Ultralytics path, fair for cross-model comparison).
+                keep = nms(valid_boxes_xyxy, final_scores, iou_threshold=0.45)
                 preds_dict.append({
-                    "boxes": valid_boxes_xyxy,
-                    "scores": final_scores,
-                    "labels": cls_labels,
+                    "boxes": valid_boxes_xyxy[keep],
+                    "scores": final_scores[keep],
+                    "labels": cls_labels[keep],
                 })
             else:
                 preds_dict.append({
