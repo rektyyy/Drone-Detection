@@ -3,6 +3,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from torchvision.ops import nms
+
+# Class id -> human-readable name, used for per-class AP logging.
+CLASS_NAMES = ["AirPlane", "Drone", "Helicopter"]
 
 
 class YoloV1Baseline(L.LightningModule):
@@ -29,7 +33,7 @@ class YoloV1Baseline(L.LightningModule):
         # 1x1 conv to map features to (5 + num_classes) per cell
         self.head = nn.Conv2d(backbone_out_channels, 5 + num_classes, kernel_size=1)
         self.lr = lr
-        self.map_metric = MeanAveragePrecision(box_format="xyxy")
+        self.map_metric = MeanAveragePrecision(box_format="xyxy", class_metrics=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, 3, H, W)
@@ -109,29 +113,72 @@ class YoloV1Baseline(L.LightningModule):
         self.log("train/loss", loss, prog_bar=True)
         return loss
 
-    def validation_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
-        images = batch["images"]
-        targets = batch["targets"]
-        preds = self(images)
-        
-        loss = self._shared_loss(preds, targets)
-        self.log("val/loss", loss, prog_bar=True)
-        
-        # Validation Inference decoding
-        B, _, H_img, W_img = images.shape
-        _, _, S, _ = preds.shape
-        
-        preds_dict = []
-        targets_dict = []
-        
+    def _decode_predictions(self, preds: torch.Tensor, img_shape: tuple[int, int],
+                            objectness_threshold: float = 0.25) -> list[dict]:
+        """Decode raw grid predictions into per-image detection dicts.
+
+        Returns a list (length B) of {"boxes": (N,4) xyxy in pixels, "scores": (N,),
+        "labels": (N,)} dicts — the format expected by torchmetrics and the
+        visualization utilities. Shared by validation_step and the analysis notebook.
+        """
+        H_img, W_img = img_shape
+        B, _, S, _ = preds.shape
+
         pred_xy = torch.sigmoid(preds[:, 0:2, :, :])
         pred_wh = torch.sigmoid(preds[:, 2:4, :, :])
-        pred_obj = torch.sigmoid(preds[:, 4, :, :]) # (B, S, S)
-        pred_cls = torch.sigmoid(preds[:, 5:, :, :]) # (B, C, S, S)
-        
+        pred_obj = torch.sigmoid(preds[:, 4, :, :])   # (B, S, S)
+        pred_cls = torch.sigmoid(preds[:, 5:, :, :])  # (B, C, S, S)
+
+        preds_dict = []
         for i in range(B):
-            # Format targets for torchmetrics
-            tgt = targets[i]
+            mask = pred_obj[i] > objectness_threshold  # Threshold for objectness
+
+            if mask.any():
+                grid_y, grid_x = torch.where(mask)  # Cell coordinates
+
+                valid_xy = pred_xy[i, :, grid_y, grid_x].T   # (N, 2) offsets
+                valid_wh = pred_wh[i, :, grid_y, grid_x].T   # (N, 2) size
+                valid_obj = pred_obj[i, grid_y, grid_x]      # (N,) objectness scores
+                valid_cls = pred_cls[i, :, grid_y, grid_x].T  # (N, C) class probabilities
+
+                cls_scores, cls_labels = torch.max(valid_cls, dim=1)  # (N,)
+                final_scores = valid_obj * cls_scores  # Combined confidence
+
+                # Decode relative (cell) coords back to global image coordinates
+                cx = (grid_x.float() + valid_xy[:, 0]) / S
+                cy = (grid_y.float() + valid_xy[:, 1]) / S
+                w = valid_wh[:, 0]
+                h = valid_wh[:, 1]
+
+                xmin = (cx - w / 2) * W_img
+                ymin = (cy - h / 2) * H_img
+                xmax = (cx + w / 2) * W_img
+                ymax = (cy + h / 2) * H_img
+
+                valid_boxes_xyxy = torch.stack([xmin, ymin, xmax, ymax], dim=1)
+
+                # NMS: multiple adjacent grid cells can predict overlapping boxes for the
+                # same object. Suppress lower-scoring duplicates at IoU > 0.45 (same
+                # threshold as the Ultralytics path, fair for cross-model comparison).
+                keep = nms(valid_boxes_xyxy, final_scores, iou_threshold=0.45)
+                preds_dict.append({
+                    "boxes": valid_boxes_xyxy[keep],
+                    "scores": final_scores[keep],
+                    "labels": cls_labels[keep],
+                })
+            else:
+                preds_dict.append({
+                    "boxes": torch.empty((0, 4), device=self.device),
+                    "scores": torch.empty((0,), device=self.device),
+                    "labels": torch.empty((0,), dtype=torch.int64, device=self.device),
+                })
+        return preds_dict
+
+    def _format_targets(self, targets: list[torch.Tensor], img_shape: tuple[int, int]) -> list[dict]:
+        """Convert YOLO-normalized targets into xyxy pixel dicts for torchmetrics."""
+        H_img, W_img = img_shape
+        targets_dict = []
+        for tgt in targets:
             if len(tgt) > 0:
                 gt_boxes_xywh = tgt[:, 1:5]
                 gt_boxes_xyxy = torch.zeros_like(gt_boxes_xywh)
@@ -139,64 +186,54 @@ class YoloV1Baseline(L.LightningModule):
                 gt_boxes_xyxy[:, 1] = (gt_boxes_xywh[:, 1] - gt_boxes_xywh[:, 3] / 2) * H_img
                 gt_boxes_xyxy[:, 2] = (gt_boxes_xywh[:, 0] + gt_boxes_xywh[:, 2] / 2) * W_img
                 gt_boxes_xyxy[:, 3] = (gt_boxes_xywh[:, 1] + gt_boxes_xywh[:, 3] / 2) * H_img
-                gt_labels = tgt[:, 0].to(torch.int64)
-                targets_dict.append({"boxes": gt_boxes_xyxy, "labels": gt_labels})
+                targets_dict.append({"boxes": gt_boxes_xyxy, "labels": tgt[:, 0].to(torch.int64)})
             else:
                 targets_dict.append({
-                    "boxes": torch.empty((0, 4), device=self.device), 
-                    "labels": torch.empty((0,), dtype=torch.int64, device=self.device)
-                })
-            
-            # Format predictions
-            mask = pred_obj[i] > 0.25 # Threshold for objectness
-            
-            if mask.any():
-                grid_y, grid_x = torch.where(mask) # Cell coordinates
-                
-                valid_xy = pred_xy[i, :, grid_y, grid_x].T # (N, 2) offsets
-                valid_wh = pred_wh[i, :, grid_y, grid_x].T # (N, 2) size
-                valid_obj = pred_obj[i, grid_y, grid_x]    # (N,) objectness scores
-                valid_cls = pred_cls[i, :, grid_y, grid_x].T # (N, C) class probabilities
-                
-                cls_scores, cls_labels = torch.max(valid_cls, dim=1) # (N,)
-                final_scores = valid_obj * cls_scores # Combined confidence
-                
-                # Decode relative (cell) coords back to global image coordinates
-                cx = (grid_x.float() + valid_xy[:, 0]) / S
-                cy = (grid_y.float() + valid_xy[:, 1]) / S
-                w = valid_wh[:, 0]
-                h = valid_wh[:, 1]
-                
-                xmin = (cx - w / 2) * W_img
-                ymin = (cy - h / 2) * H_img
-                xmax = (cx + w / 2) * W_img
-                ymax = (cy + h / 2) * H_img
-                
-                valid_boxes_xyxy = torch.stack([xmin, ymin, xmax, ymax], dim=1)
-                
-                preds_dict.append({
-                    "boxes": valid_boxes_xyxy,
-                    "scores": final_scores,
-                    "labels": cls_labels
-                })
-            else:
-                preds_dict.append({
                     "boxes": torch.empty((0, 4), device=self.device),
-                    "scores": torch.empty((0,), device=self.device),
-                    "labels": torch.empty((0,), dtype=torch.int64, device=self.device)
+                    "labels": torch.empty((0,), dtype=torch.int64, device=self.device),
                 })
-                
+        return targets_dict
+
+    def validation_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
+        images = batch["images"]
+        targets = batch["targets"]
+        preds = self(images)
+
+        loss = self._shared_loss(preds, targets)
+        self.log("val/loss", loss, prog_bar=True)
+
+        img_shape = (images.shape[2], images.shape[3])
+        preds_dict = self._decode_predictions(preds, img_shape)
+        targets_dict = self._format_targets(targets, img_shape)
         self.map_metric.update(preds_dict, targets_dict)
         return loss
-        
-    def on_validation_epoch_end(self) -> None:
+
+    def _log_map_metrics(self, prefix: str) -> None:
+        """Compute, log (overall + per-class AP) and reset the mAP metric."""
         metrics = self.map_metric.compute()
-        self.log("val/mAP50", metrics["map_50"], sync_dist=True)
-        self.log("val/mAP50-95", metrics["map"], sync_dist=True)
+        self.log(f"{prefix}/mAP50", metrics["map_50"], sync_dist=True)
+        self.log(f"{prefix}/mAP50-95", metrics["map"], sync_dist=True)
+
+        # class_metrics=True yields per-class AP, but only for classes present in the
+        # split — metrics["classes"] gives the matching class ids (order is NOT a fixed
+        # 0,1,2). Map each entry back to its name; clamp -1 (torchmetrics' "absent") to 0.
+        per_class = metrics.get("map_per_class")
+        class_ids = metrics.get("classes")
+        if per_class is not None and per_class.ndim > 0 and class_ids is not None:
+            for ap, cls_id in zip(per_class, class_ids.tolist()):
+                if 0 <= cls_id < len(CLASS_NAMES):
+                    self.log(f"{prefix}/AP_{CLASS_NAMES[cls_id]}", max(ap.item(), 0.0), sync_dist=True)
+
         self.map_metric.reset()
+
+    def on_validation_epoch_end(self) -> None:
+        self._log_map_metrics("val")
 
     def test_step(self, batch: dict, batch_idx: int) -> None:
         self.validation_step(batch, batch_idx)
+
+    def on_test_epoch_end(self) -> None:
+        self._log_map_metrics("test")
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)

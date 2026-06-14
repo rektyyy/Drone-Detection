@@ -90,9 +90,8 @@ def main(config_path, resume_run_name, no_wandb, seed):
             # including those inherited from base configs. This ensures the uploaded file is
             # self-contained and accurately reflects what was actually used in this run.
             # Uploading the file at config_path directly would only capture the overrides,
-            # losing any values inherited from a base config (e.g. if config_path points to
-            # src/config/lr_comparison/1e-2.py, all values from convnet_utkface_classifier.py
-            # would be lost).
+            # losing any values inherited from a base config (e.g. a config that calls
+            # another config's build_config() and overrides only a few fields).
             generated = codegen.codegen_dot_syntax(cfg)
             code_str = "\n".join(generated.lines())
             artifact = wandb.Artifact(name=f"{run_name}_config", type="config")
@@ -116,6 +115,15 @@ def main(config_path, resume_run_name, no_wandb, seed):
         model=model,
         datamodule=data_module,
         ckpt_path=ckpt_path,
+    )
+
+    # Evaluate the best checkpoint (by val/mAP50) on the held-out test split.
+    # ModelCheckpoint is configured in every config, so ckpt_path="best" resolves
+    # to the top checkpoint; logs test/mAP50, test/mAP50-95 and per-class AP.
+    trainer.test(
+        model=model,
+        datamodule=data_module,
+        ckpt_path="best",
     )
 
 
