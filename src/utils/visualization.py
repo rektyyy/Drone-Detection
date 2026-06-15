@@ -1,10 +1,25 @@
 """Plotting helpers for qualitative analysis of detection results."""
 
+import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from PIL import Image
 from torchvision.utils import draw_bounding_boxes
+
+
+def _find_ttf() -> str | None:
+    """Return a path to any readable TTF font, or None if none found."""
+    try:
+        path = fm.findfont(fm.FontProperties(family="monospace"), fallback_to_default=True)
+        if path and path.endswith(".ttf"):
+            return path
+    except Exception:
+        pass
+    return None
+
+
+_TTF_FONT = _find_ttf()
 
 # One fixed color per class so figures are consistent across models.
 CLASS_COLORS = {
@@ -12,6 +27,24 @@ CLASS_COLORS = {
     "Drone": "lime",
     "Helicopter": "deepskyblue",
 }
+
+
+def detection_caption(
+    labels: torch.Tensor,
+    class_names: list[str],
+    scores: torch.Tensor | None = None,
+) -> str:
+    """Return a short human-readable summary of detections for use as a subplot label."""
+    if labels is None or len(labels) == 0:
+        return "—"
+    parts = []
+    for i, lbl in enumerate(labels.tolist()):
+        name = class_names[lbl] if 0 <= lbl < len(class_names) else str(lbl)
+        if scores is not None:
+            parts.append(f"{name} {scores[i].item():.2f}")
+        else:
+            parts.append(name)
+    return ", ".join(parts)
 
 
 def draw_boxes(
@@ -22,6 +55,7 @@ def draw_boxes(
     scores: torch.Tensor | None = None,
     font_size: int | None = None,
     line_width: int | None = None,
+    show_labels: bool = True,
 ) -> Image.Image:
     """Draw labeled bounding boxes on an image and return a PIL image.
 
@@ -59,8 +93,13 @@ def draw_boxes(
         text_labels.append(text)
         colors.append(CLASS_COLORS.get(name, "yellow"))
 
-    drawn = draw_bounding_boxes(img, boxes, labels=text_labels, colors=colors,
-                                width=lw, font_size=fs)
+    drawn = draw_bounding_boxes(
+        img, boxes,
+        labels=text_labels if show_labels else None,
+        colors=colors,
+        width=lw,
+        **({"font_size": fs, "font": _TTF_FONT} if show_labels else {}),
+    )
     return Image.fromarray(drawn.permute(1, 2, 0).numpy())
 
 
